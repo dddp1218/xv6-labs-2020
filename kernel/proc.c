@@ -658,3 +658,15 @@ procdump(void)
     printf("\n");
   }
 }
+
+uint64
+count_process(void)
+{
+  uint64 cnt = 0;
+  for(struct proc *p = proc; p < &proc[NPROC]; p++){
+    if(p->state != UNUSED) { // 不是 UNUSED 的进程位，就是已经分配的
+        cnt++;
+    }
+  }
+  return cnt;
+}
