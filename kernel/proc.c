@@ -18,7 +18,7 @@ struct spinlock pid_lock;
 extern void forkret(void);
 static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
-
+void  proc_freekernelpt(pagetable_t kernelpt);
 extern char trampoline[]; // trampoline.S
 
 // initialize the proc table at boot time.
@@ -120,6 +120,23 @@ found:
     release(&p->lock);
     return 0;
   }
+  // Init the kernal page table
+  p->kernelpt = proc_kpt_init();
+  if(p->kernelpt == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  uvmmap(p->kernelpt, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -149,6 +166,11 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  // free the kernel stack in the RAM
+  uvmunmap(p->kernelpt, p->kstack, 1, 1);
+  p->kstack = 0;
+  proc_freekernelpt(p->kernelpt);
+  p->kernelpt = 0;
   p->state = UNUSED;
 }
 
@@ -238,16 +260,19 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz,sz1;
   struct proc *p = myproc();
 
   sz = p->sz;
+  sz1 = sz;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    kvmcopy(p->pagetable,p->kernelpt,sz1,sz1 + n);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    kvmdealloc(p->kernelpt, sz1, sz1 + n);
   }
   p->sz = sz;
   return 0;
@@ -273,8 +298,12 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+  if(kvmcopy(np->pagetable, np->kernelpt,0, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
   np->sz = p->sz;
-
   np->parent = p;
 
   // copy saved user registers.
@@ -473,7 +502,11 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        // Store the kernal page table into the SATP
+        proc_inithart(p->kernelpt);
         swtch(&c->context, &p->context);
+        // Come back to the global kernel page table
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
@@ -696,4 +729,22 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void
+proc_freekernelpt(pagetable_t kernelpt)
+{
+  // similar to the freewalk method
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = kernelpt[i];
+    if(pte & PTE_V){
+      kernelpt[i] = 0;
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        uint64 child = PTE2PA(pte);
+        proc_freekernelpt((pagetable_t)child);
+      }
+    }
+  }
+  kfree((void*)kernelpt);
 }
