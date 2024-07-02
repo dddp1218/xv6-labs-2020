@@ -179,6 +179,7 @@ UPROGS=\
 
 
 
+
 ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 UPROGS += \
 	$U/_stats
@@ -226,7 +227,8 @@ endif
 
 ifeq ($(LAB),fs)
 UPROGS += \
-	$U/_bigfile
+	$U/_bigfile\
+	$U/_symlinktest
 endif
 
 
