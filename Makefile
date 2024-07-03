@@ -179,6 +179,7 @@ UPROGS=\
 
 
 
+
 ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 UPROGS += \
 	$U/_stats
@@ -229,7 +230,10 @@ UPROGS += \
 	$U/_bigfile
 endif
 
-
+ifeq ($(LAB),mmap)
+UPROGS += \
+	$U/_mmaptest
+endif
 
 ifeq ($(LAB),net)
 UPROGS += \
